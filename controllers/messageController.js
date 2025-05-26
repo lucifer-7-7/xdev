@@ -40,14 +40,23 @@ const sendMessage = async (req, res) => {
 // Get conversation between two channels
 const getConversation = async (req, res) => {
     try {
-        const { channelId } = req.params
-        const currentChannelId = req.channel.id
+        const { channelId } = req.params;
+        const currentChannelId = req.channel.id;
+        
+        // Validate channel ID format
+        if (!mongoose.Types.ObjectId.isValid(channelId)) {
+            return res.status(400).json({ error: 'Invalid channel ID format' });
+        }
 
         // Mark messages as read when fetching
         await Message.updateMany(
-            { sender: channelId, recipient: currentChannelId, read: false },
+            { 
+                sender: channelId, 
+                recipient: currentChannelId, 
+                read: false 
+            },
             { read: true }
-        )
+        );
 
         // Get messages between the two channels
         const messages = await Message.find({
@@ -58,27 +67,30 @@ const getConversation = async (req, res) => {
         })
             .sort({ sentAt: 1 })
             .populate('sender', 'name handle logoURL')
-            .populate('recipient', 'name handle logoURL')
+            .populate('recipient', 'name handle logoURL');
 
-        res.status(200).json(messages)
+        res.status(200).json(messages);
     } catch (error) {
-        console.error('Error getting conversation:', error)
-        res.status(500).json({ error: 'Server error' })
+        console.error('Error getting conversation:', error);
+        res.status(500).json({ error: 'Server error', message: error.message });
     }
 }
 
 // Get all conversations for the current channel
 const getConversations = async (req, res) => {
     try {
-        const channelId = req.channel.id
+        // Log the user and channel making the request
+        console.log('Getting conversations for channel:', req.channel.id, req.channel.name);
+        
+        const channelId = new mongoose.Types.ObjectId(req.channel.id);
 
         // Find the most recent message for each conversation
         const conversations = await Message.aggregate([
             {
                 $match: {
                     $or: [
-                        { sender: mongoose.Types.ObjectId(channelId) },
-                        { recipient: mongoose.Types.ObjectId(channelId) }
+                        { sender: channelId },
+                        { recipient: channelId }
                     ]
                 }
             },
@@ -89,7 +101,7 @@ const getConversations = async (req, res) => {
                 $group: {
                     _id: {
                         $cond: [
-                            { $eq: ["$sender", mongoose.Types.ObjectId(channelId)] },
+                            { $eq: ["$sender", channelId] },
                             "$recipient",
                             "$sender"
                         ]
@@ -98,29 +110,79 @@ const getConversations = async (req, res) => {
                     unreadCount: {
                         $sum: {
                             $cond: [
-                                { $and: [
-                                    { $eq: ["$recipient", mongoose.Types.ObjectId(channelId)] },
-                                    { $eq: ["$read", false] }
-                                ]},
+                                { 
+                                    $and: [
+                                        { $eq: ["$recipient", channelId] },
+                                        { $eq: ["$read", false] }
+                                    ]
+                                },
                                 1,
                                 0
                             ]
                         }
                     }
                 }
+            },
+            {
+                $sort: { "lastMessage.sentAt": -1 }
             }
-        ])
+        ]);
+        
+        console.log('Found raw conversations:', conversations.length);
+        
+        // If no conversations were found, return an empty array
+        if (!conversations || conversations.length === 0) {
+            console.log('No conversations found for channel:', req.channel.id);
+            return res.status(200).json([]);
+        }
 
         // Get channel details for each conversation
         const populatedConversations = await Channel.populate(conversations, {
             path: '_id',
             select: 'name handle logoURL'
-        })
+        });
+        
+        console.log('Populated conversations:', populatedConversations.length);
 
-        res.status(200).json(populatedConversations)
+        // Ensure consistent structure and filter out invalid conversations
+        const validConversations = populatedConversations
+            .filter(conv => {
+                if (!conv._id || !conv._id.name) {
+                    console.log('Filtering out invalid conversation:', conv);
+                    return false;
+                }
+                return true;
+            })
+            .map(conv => {
+                // Format conversation object to ensure consistent structure
+                return {
+                    _id: {
+                        _id: conv._id._id || conv._id,
+                        name: conv._id.name,
+                        handle: conv._id.handle,
+                        logoURL: conv._id.logoURL || '/img/default-channel-logo.png'
+                    },
+                    lastMessage: {
+                        content: conv.lastMessage.content,
+                        sentAt: conv.lastMessage.sentAt,
+                        read: conv.lastMessage.read
+                    },
+                    unreadCount: conv.unreadCount
+                };
+            });
+        
+        console.log('Valid conversations to return:', validConversations.length);
+        
+        // Return the results
+        res.status(200).json(validConversations);
     } catch (error) {
-        console.error('Error getting conversations:', error)
-        res.status(500).json({ error: 'Server error' })
+        console.error('Error getting conversations:', error);
+        // Return a more detailed error message
+        res.status(500).json({ 
+            error: 'Server error', 
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 }
 
@@ -146,4 +208,4 @@ module.exports = {
     getConversation,
     getConversations,
     getUnreadCount
-} 
+}

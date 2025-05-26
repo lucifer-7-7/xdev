@@ -46,6 +46,35 @@
         return `${years} ${years === 1 ? "year" : "years"} ago`
       }
     }
+
+    // Function to update the unread message count badge
+    function updateUnreadMessageCount() {
+      const notificationBadge = document.querySelector('.notification-badge');
+      if (notificationBadge) {
+        fetch('/messages/unread')
+          .then(response => response.json())
+          .then(data => {
+            if (data.unreadCount > 0) {
+              notificationBadge.textContent = data.unreadCount > 9 ? '9+' : data.unreadCount;
+            } else {
+              notificationBadge.textContent = '';
+            }
+          })
+          .catch(error => {
+            console.error('Error fetching unread count:', error);
+            notificationBadge.textContent = '';
+          });
+      }
+    }
+
+    // Update unread count when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      if (document.querySelector('.notification-badge')) {
+        updateUnreadMessageCount();
+        // Update every 30 seconds
+        setInterval(updateUnreadMessageCount, 30000);
+      }
+    });
   </script>
 
   <main>

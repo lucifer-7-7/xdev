@@ -12,8 +12,18 @@
   
   <div class="message-content">
     <% if (subPage === 'inbox') { %>
-      <div class="conversations-list main-conversations">
-        <!-- Conversations will be loaded here -->
+      <div class="main-content-wrapper">
+        
+        <!-- Add empty state placeholder -->
+        <div class="no-conversation-selected">
+          <div class="placeholder-content">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="currentColor">
+              <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
+            </svg>
+            <h3>Your Messages</h3>
+            <p>Select a conversation to view messages</p>
+          </div>
+        </div>
       </div>
     <% } else if (subPage === 'conversation') { %>
       <div class="conversation">
@@ -68,6 +78,32 @@
   </div>
 </template>
 
+<style>
+  /* Error message styling */
+  .error-message {
+    background-color: #ffdddd;
+    color: #d32f2f;
+    padding: 15px;
+    border-radius: 4px;
+    margin: 10px;
+    text-align: center;
+  }
+  
+  .retry-button {
+    background-color: #2196f3;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 10px;
+  }
+  
+  .retry-button:hover {
+    background-color: #0b7dda;
+  }
+</style>
+
 <script>
   // Variables
   const sidebarConversationsList = document.querySelector('.sidebar-conversations');
@@ -78,6 +114,25 @@
   const conversationHeader = document.getElementById('conversation-header');
   let currentRecipientId = '<%= typeof recipientId !== "undefined" ? recipientId : "" %>';
   const subPage = '<%= subPage %>';
+  
+  // Display error message with retry button
+  function displayErrorMessage(container, message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'error-message';
+    
+    const messageP = document.createElement('p');
+    messageP.textContent = message;
+    errorDiv.appendChild(messageP);
+    
+    const retryButton = document.createElement('button');
+    retryButton.className = 'retry-button';
+    retryButton.textContent = 'Retry';
+    retryButton.addEventListener('click', loadConversations);
+    errorDiv.appendChild(retryButton);
+    
+    container.innerHTML = '';
+    container.appendChild(errorDiv);
+  }
   
   // Format time
   function formatMessageTime(date) {
@@ -99,21 +154,88 @@
     return messageDate.toLocaleDateString();
   }
   
-  // Load conversations
+  // Check authentication status
+  async function checkAuthStatus() {
+    try {
+      const response = await fetch('/messages/auth-status');
+      if (response.ok) {
+        const data = await response.json();
+        return data.authenticated && data.hasChannel;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      return false;
+    }
+  }
+  
+  // Load conversations with authentication check
   async function loadConversations() {
     try {
+      console.log('Checking authentication before fetching conversations...');
+      
+      // First check authentication status
+      const isAuthenticated = await checkAuthStatus();
+      if (!isAuthenticated) {
+        console.error('Not authenticated or no channel');
+        displayErrorMessage(sidebarConversationsList, 'Please log in and create a channel to view messages.');
+        
+        if (mainConversationsList) {
+          displayErrorMessage(mainConversationsList, 'Please log in and create a channel to view messages.');
+        }
+        return;
+      }
+      
+      console.log('Fetching conversations...');
       const response = await fetch('/messages/conversations');
       
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error fetching conversations:', response.status, errorText);
-        // Optionally display an error message to the user
+        const contentType = response.headers.get('content-type');
+        let errorMessage = `Error ${response.status}: `;
+        
+        try {
+          // Only try to parse as JSON if the content type is JSON
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            errorMessage += errorData.error || errorData.message || 'Unknown error';
+          } else {
+            // Otherwise just get the text
+            errorMessage += await response.text();
+          }
+        } catch (parseError) {
+          errorMessage += 'Could not parse error response';
+          console.error('Error parsing response:', parseError);
+        }
+        
+        console.error('Error fetching conversations:', errorMessage);
+        
+        // Display error message with retry button
+        displayErrorMessage(sidebarConversationsList, `Error loading conversations. Please try again.`);
+        
+        if (mainConversationsList) {
+          displayErrorMessage(mainConversationsList, `Error loading conversations. Please try again.`);
+        }
         return;
       }
 
-      const conversations = await response.json();
+      let conversations;
+      try {
+        conversations = await response.json();
+        console.log('Loaded conversations:', conversations);
+      } catch (jsonError) {
+        console.error('Error parsing conversations JSON:', jsonError);
+        displayErrorMessage(sidebarConversationsList, 'Error parsing server response. Please try again.');
+        
+        if (mainConversationsList) {
+          displayErrorMessage(mainConversationsList, 'Error parsing server response. Please try again.');
+        }
+        return;
+      }
       
-      console.log('Loaded conversations:', conversations);
+      // Additional debug info for empty arrays
+      if (!conversations || conversations.length === 0) {
+        console.log('No conversations returned from API');
+      }
       
       // Clear existing lists
       sidebarConversationsList.innerHTML = '';
@@ -121,7 +243,7 @@
         mainConversationsList.innerHTML = '';
       }
       
-      if (conversations.length === 0) {
+      if (!conversations || conversations.length === 0) {
         const noMessages = document.createElement('div');
         noMessages.className = 'no-messages';
         noMessages.textContent = 'No conversations yet';
@@ -132,20 +254,50 @@
         return;
       }
       
+      // Debug each conversation object
+      conversations.forEach((conversation, index) => {
+        console.log(`Conversation ${index}:`, JSON.stringify(conversation));
+      });
+      
       conversations.forEach(conversation => {
+        // Skip invalid conversations
+        if (!conversation._id || !conversation.lastMessage) {
+          console.warn('Skipping invalid conversation:', conversation);
+          return;
+        }
+        
         const template = document.getElementById('conversation-item-template');
         const clone = document.importNode(template.content, true);
         const item = clone.querySelector('.conversation-item');
         
-        item.setAttribute('data-id', conversation._id._id);
-        item.querySelector('.avatar img').src = conversation._id.logoURL;
-        item.querySelector('.name').textContent = conversation._id.name;
-        item.querySelector('.last-message').textContent = 
-          conversation.lastMessage.content.length > 30
-            ? conversation.lastMessage.content.substring(0, 30) + '...'
-            : conversation.lastMessage.content;
-        item.querySelector('.time').textContent = formatMessageTime(conversation.lastMessage.sentAt);
+        // Make sure we have the proper ID
+        const channelId = conversation._id._id || conversation._id;
+        item.setAttribute('data-id', channelId);
         
+        // Set avatar if available
+        if (conversation._id.logoURL) {
+          item.querySelector('.avatar img').src = conversation._id.logoURL;
+        }
+        
+        // Set channel name
+        item.querySelector('.name').textContent = conversation._id.name || 'Unknown Channel';
+        
+        // Set last message with proper truncation
+        if (conversation.lastMessage.content) {
+          item.querySelector('.last-message').textContent = 
+            conversation.lastMessage.content.length > 30
+              ? conversation.lastMessage.content.substring(0, 30) + '...'
+              : conversation.lastMessage.content;
+        } else {
+          item.querySelector('.last-message').textContent = 'No message content';
+        }
+        
+        // Set time
+        if (conversation.lastMessage.sentAt) {
+          item.querySelector('.time').textContent = formatMessageTime(conversation.lastMessage.sentAt);
+        }
+        
+        // Handle unread badge
         const unreadBadge = item.querySelector('.unread-badge');
         if (conversation.unreadCount > 0) {
           unreadBadge.textContent = conversation.unreadCount;
@@ -154,14 +306,54 @@
           unreadBadge.style.display = 'none';
         }
         
+        // Add click event
         item.addEventListener('click', () => {
-          window.location.href = `/messages/${conversation._id._id}`;
+          window.location.href = `/messages/${channelId}`;
         });
         
-        // Append to both lists
-        sidebarConversationsList.appendChild(clone.cloneNode(true));
+        // Append to both lists - first the sidebar
+        sidebarConversationsList.appendChild(clone);
+        
+        // Then to the main list if it exists
         if (mainConversationsList) {
-            mainConversationsList.appendChild(clone.cloneNode(true));
+          const mainClone = document.importNode(template.content, true);
+          const mainItem = mainClone.querySelector('.conversation-item');
+          
+          // Copy all the attributes and content
+          mainItem.setAttribute('data-id', channelId);
+          
+          if (conversation._id.logoURL) {
+            mainItem.querySelector('.avatar img').src = conversation._id.logoURL;
+          }
+          
+          mainItem.querySelector('.name').textContent = conversation._id.name || 'Unknown Channel';
+          
+          if (conversation.lastMessage.content) {
+            mainItem.querySelector('.last-message').textContent = 
+              conversation.lastMessage.content.length > 30
+                ? conversation.lastMessage.content.substring(0, 30) + '...'
+                : conversation.lastMessage.content;
+          } else {
+            mainItem.querySelector('.last-message').textContent = 'No message content';
+          }
+          
+          if (conversation.lastMessage.sentAt) {
+            mainItem.querySelector('.time').textContent = formatMessageTime(conversation.lastMessage.sentAt);
+          }
+          
+          const mainUnreadBadge = mainItem.querySelector('.unread-badge');
+          if (conversation.unreadCount > 0) {
+            mainUnreadBadge.textContent = conversation.unreadCount;
+            mainUnreadBadge.style.display = 'flex';
+          } else {
+            mainUnreadBadge.style.display = 'none';
+          }
+          
+          mainItem.addEventListener('click', () => {
+            window.location.href = `/messages/${channelId}`;
+          });
+          
+          mainConversationsList.appendChild(mainClone);
         }
       });
       
@@ -171,24 +363,58 @@
         if (currentItem) {
           currentItem.classList.add('active');
         }
-         if (mainConversationsList) {
-           const currentItemMain = mainConversationsList.querySelector(`[data-id="${currentRecipientId}"]`);
-           if (currentItemMain) {
-             currentItemMain.classList.add('active');
-           }
+        if (mainConversationsList) {
+          const currentItemMain = mainConversationsList.querySelector(`[data-id="${currentRecipientId}"]`);
+          if (currentItemMain) {
+            currentItemMain.classList.add('active');
+          }
         }
       }
     } catch (error) {
       console.error('Error loading conversations:', error);
+      
+      // Use the displayErrorMessage function for consistent error display
+      displayErrorMessage(
+        sidebarConversationsList, 
+        'Could not load conversations. Please check your connection and try again.'
+      );
+      
+      if (mainConversationsList) {
+        displayErrorMessage(
+          mainConversationsList, 
+          'Could not load conversations. Please check your connection and try again.'
+        );
+      }
     }
   }
   
   // Load conversation with a specific channel
   async function loadConversation(channelId) {
     try {
+      // Validate channel ID format
+      if (!channelId || !/^[0-9a-fA-F]{24}$/.test(channelId)) {
+        console.error('Invalid channel ID format:', channelId);
+        messagesContainer.innerHTML = '<div class="error-message">Invalid channel ID</div>';
+        return;
+      }
+      
       // Load channel info
       const channelResponse = await fetch(`/api/channel/${channelId}`);
-      const channel = await channelResponse.json();
+      
+      if (!channelResponse.ok) {
+        console.error('Error fetching channel info:', channelResponse.status);
+        messagesContainer.innerHTML = '<div class="error-message">Could not load channel information</div>';
+        return;
+      }
+      
+      let channel;
+      try {
+        channel = await channelResponse.json();
+      } catch (error) {
+        console.error('Error parsing channel JSON:', error);
+        messagesContainer.innerHTML = '<div class="error-message">Error parsing channel data</div>';
+        return;
+      }
       
       // Update header
       conversationHeader.innerHTML = `
@@ -203,7 +429,21 @@
       
       // Load messages
       const messagesResponse = await fetch(`/messages/conversation/${channelId}`);
-      const messages = await messagesResponse.json();
+      
+      if (!messagesResponse.ok) {
+        console.error('Error fetching messages:', messagesResponse.status);
+        messagesContainer.innerHTML = '<div class="error-message">Could not load messages</div>';
+        return;
+      }
+      
+      let messages;
+      try {
+        messages = await messagesResponse.json();
+      } catch (error) {
+        console.error('Error parsing messages JSON:', error);
+        messagesContainer.innerHTML = '<div class="error-message">Error parsing message data</div>';
+        return;
+      }
       
       messagesContainer.innerHTML = '';
       
@@ -223,7 +463,7 @@
         const isSent = message.sender._id === '<%= channel?.id %>';
         messageEl.classList.add(isSent ? 'sent' : 'received');
         
-        messageEl.querySelector('.avatar img').src = message.sender.logoURL;
+        messageEl.querySelector('.avatar img').src = message.sender.logoURL || '/img/default-channel-logo.png';
         messageEl.querySelector('.sender').textContent = message.sender.name;
         messageEl.querySelector('.text').textContent = message.content;
         messageEl.querySelector('.time').textContent = formatMessageTime(message.sentAt);
@@ -235,6 +475,7 @@
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     } catch (error) {
       console.error('Error loading conversation:', error);
+      messagesContainer.innerHTML = '<div class="error-message">An error occurred while loading the conversation</div>';
     }
   }
   
@@ -244,6 +485,19 @@
     if (!content) return;
     
     try {
+      // Validate recipient ID
+      if (!currentRecipientId || !/^[0-9a-fA-F]{24}$/.test(currentRecipientId)) {
+        console.error('Invalid recipient ID:', currentRecipientId);
+        alert('Cannot send message: Invalid recipient');
+        return;
+      }
+      
+      // Show sending indicator
+      const sendingIndicator = document.createElement('div');
+      sendingIndicator.className = 'sending-indicator';
+      sendingIndicator.textContent = 'Sending...';
+      messagesContainer.appendChild(sendingIndicator);
+      
       const response = await fetch('/messages/send', {
         method: 'POST',
         headers: {
@@ -255,6 +509,9 @@
         })
       });
       
+      // Remove sending indicator
+      sendingIndicator.remove();
+      
       if (response.ok) {
         messageInput.value = '';
         messageInput.style.height = 'auto';
@@ -262,17 +519,25 @@
         // Reload conversation to show new message
         await loadConversation(currentRecipientId);
       } else {
-         const errorData = await response.json();
-        console.error('Error sending message:', errorData);
+        let errorData;
+        try {
+          errorData = await response.json();
+          console.error('Error sending message:', errorData);
+          alert(`Failed to send message: ${errorData.error || 'Unknown error'}`);
+        } catch (parseError) {
+          console.error('Error parsing error response:', parseError);
+          alert('Failed to send message. Please try again.');
+        }
       }
     } catch (error) {
       console.error('Error sending message:', error);
+      alert('Failed to send message. Please check your connection and try again.');
     }
   }
   
   // Initialize
   document.addEventListener('DOMContentLoaded', async () => {
-    // Load conversations
+    // Load conversations immediately
     await loadConversations();
     
     // If on conversation page, load conversation
@@ -289,8 +554,8 @@
       });
     }
     
-    // Set up refresh interval for conversations
-    setInterval(loadConversations, 30000); // Refresh every 30 seconds
+    // Set up refresh interval for conversations - shorter interval to ensure inbox is updated
+    setInterval(loadConversations, 15000); // Refresh every 15 seconds
     
     // If on conversation page, set up refresh interval for messages
     if (subPage === 'conversation' && currentRecipientId) {

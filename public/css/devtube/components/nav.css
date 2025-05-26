@@ -78,6 +78,7 @@ nav .right .child {
     align-items: center;
     justify-content: center;
     padding: 8px;
+    position: relative;
 }
 
 nav .signin {
@@ -399,4 +400,30 @@ nav .mid .search .btn {
     border-top-right-radius: 50px;
     border-bottom-right-radius: 50px;
     width: 70px;
+}
+
+/* Notification badge styling */
+.messages-icon {
+    position: relative;
+}
+
+.notification-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 18px;
+    height: 18px;
+    background-color: #ff0000;
+    border-radius: 50%;
+    color: white;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+}
+
+/* Hide badge when no unread messages */
+.notification-badge:empty {
+    display: none;
 }
