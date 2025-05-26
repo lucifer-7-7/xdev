@@ -1,0 +1,300 @@
+<link rel="stylesheet" href="/css/devtube/pages/messages.css">
+
+<div class="messages-main">
+  <div class="sidebar">
+    <div class="header">
+      <h2>Messages</h2>
+    </div>
+    <div class="conversations-list sidebar-conversations">
+      <!-- Conversations will be loaded here -->
+    </div>
+  </div>
+  
+  <div class="message-content">
+    <% if (subPage === 'inbox') { %>
+      <div class="conversations-list main-conversations">
+        <!-- Conversations will be loaded here -->
+      </div>
+    <% } else if (subPage === 'conversation') { %>
+      <div class="conversation">
+        <div class="conversation-header" id="conversation-header">
+          <!-- Channel info will be loaded here -->
+        </div>
+        <div class="messages-container" id="messages-container">
+          <!-- Messages will be loaded here -->
+        </div>
+        <div class="message-input">
+          <textarea 
+            id="message-input" 
+            placeholder="Type a message..." 
+            class="scrollable"
+            onInput="this.style.height='1px'; this.style.height = (this.scrollHeight)+'px';"
+          ></textarea>
+          <button id="send-button">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    <% } %>
+  </div>
+</div>
+
+<template id="conversation-item-template">
+  <div class="conversation-item">
+    <div class="avatar">
+      <img src="" alt="Channel avatar">
+    </div>
+    <div class="info">
+      <div class="name"></div>
+      <div class="last-message"></div>
+    </div>
+    <div class="time"></div>
+    <div class="unread-badge">0</div>
+  </div>
+</template>
+
+<template id="message-template">
+  <div class="message">
+    <div class="avatar">
+      <img src="" alt="Channel avatar">
+    </div>
+    <div class="content">
+      <div class="sender"></div>
+      <div class="text"></div>
+      <div class="time"></div>
+    </div>
+  </div>
+</template>
+
+<script>
+  // Variables
+  const sidebarConversationsList = document.querySelector('.sidebar-conversations');
+  const mainConversationsList = document.querySelector('.main-conversations');
+  const messagesContainer = document.getElementById('messages-container');
+  const messageInput = document.getElementById('message-input');
+  const sendButton = document.getElementById('send-button');
+  const conversationHeader = document.getElementById('conversation-header');
+  let currentRecipientId = '<%= typeof recipientId !== "undefined" ? recipientId : "" %>';
+  const subPage = '<%= subPage %>';
+  
+  // Format time
+  function formatMessageTime(date) {
+    const messageDate = new Date(date);
+    const now = new Date();
+    const diff = now - messageDate;
+    
+    // If less than 24 hours, show time
+    if (diff < 24 * 60 * 60 * 1000) {
+      return messageDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    
+    // If less than 7 days, show day of week
+    if (diff < 7 * 24 * 60 * 60 * 1000) {
+      return messageDate.toLocaleDateString([], { weekday: 'short' });
+    }
+    
+    // Otherwise show date
+    return messageDate.toLocaleDateString();
+  }
+  
+  // Load conversations
+  async function loadConversations() {
+    try {
+      const response = await fetch('/messages/conversations');
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Error fetching conversations:', response.status, errorText);
+        // Optionally display an error message to the user
+        return;
+      }
+
+      const conversations = await response.json();
+      
+      console.log('Loaded conversations:', conversations);
+      
+      // Clear existing lists
+      sidebarConversationsList.innerHTML = '';
+      if (mainConversationsList) {
+        mainConversationsList.innerHTML = '';
+      }
+      
+      if (conversations.length === 0) {
+        const noMessages = document.createElement('div');
+        noMessages.className = 'no-messages';
+        noMessages.textContent = 'No conversations yet';
+        sidebarConversationsList.appendChild(noMessages.cloneNode(true));
+        if (mainConversationsList) {
+           mainConversationsList.appendChild(noMessages);
+        }
+        return;
+      }
+      
+      conversations.forEach(conversation => {
+        const template = document.getElementById('conversation-item-template');
+        const clone = document.importNode(template.content, true);
+        const item = clone.querySelector('.conversation-item');
+        
+        item.setAttribute('data-id', conversation._id._id);
+        item.querySelector('.avatar img').src = conversation._id.logoURL;
+        item.querySelector('.name').textContent = conversation._id.name;
+        item.querySelector('.last-message').textContent = 
+          conversation.lastMessage.content.length > 30
+            ? conversation.lastMessage.content.substring(0, 30) + '...'
+            : conversation.lastMessage.content;
+        item.querySelector('.time').textContent = formatMessageTime(conversation.lastMessage.sentAt);
+        
+        const unreadBadge = item.querySelector('.unread-badge');
+        if (conversation.unreadCount > 0) {
+          unreadBadge.textContent = conversation.unreadCount;
+          unreadBadge.style.display = 'flex';
+        } else {
+          unreadBadge.style.display = 'none';
+        }
+        
+        item.addEventListener('click', () => {
+          window.location.href = `/messages/${conversation._id._id}`;
+        });
+        
+        // Append to both lists
+        sidebarConversationsList.appendChild(clone.cloneNode(true));
+        if (mainConversationsList) {
+            mainConversationsList.appendChild(clone.cloneNode(true));
+        }
+      });
+      
+      // Highlight current conversation if on conversation page
+      if (subPage === 'conversation' && currentRecipientId) {
+        const currentItem = sidebarConversationsList.querySelector(`[data-id="${currentRecipientId}"]`);
+        if (currentItem) {
+          currentItem.classList.add('active');
+        }
+         if (mainConversationsList) {
+           const currentItemMain = mainConversationsList.querySelector(`[data-id="${currentRecipientId}"]`);
+           if (currentItemMain) {
+             currentItemMain.classList.add('active');
+           }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+    }
+  }
+  
+  // Load conversation with a specific channel
+  async function loadConversation(channelId) {
+    try {
+      // Load channel info
+      const channelResponse = await fetch(`/api/channel/${channelId}`);
+      const channel = await channelResponse.json();
+      
+      // Update header
+      conversationHeader.innerHTML = `
+        <div class="avatar">
+          <img src="${channel.logoURL}" alt="${channel.name}">
+        </div>
+        <div class="info">
+          <div class="name">${channel.name}</div>
+          <div class="handle">@${channel.handle}</div>
+        </div>
+      `;
+      
+      // Load messages
+      const messagesResponse = await fetch(`/messages/conversation/${channelId}`);
+      const messages = await messagesResponse.json();
+      
+      messagesContainer.innerHTML = '';
+      
+      if (messages.length === 0) {
+        const noMessages = document.createElement('div');
+        noMessages.className = 'no-messages';
+        noMessages.textContent = 'No messages yet. Start a conversation!';
+        messagesContainer.appendChild(noMessages);
+        return;
+      }
+      
+      messages.forEach(message => {
+        const template = document.getElementById('message-template');
+        const clone = document.importNode(template.content, true);
+        const messageEl = clone.querySelector('.message');
+        
+        const isSent = message.sender._id === '<%= channel?.id %>';
+        messageEl.classList.add(isSent ? 'sent' : 'received');
+        
+        messageEl.querySelector('.avatar img').src = message.sender.logoURL;
+        messageEl.querySelector('.sender').textContent = message.sender.name;
+        messageEl.querySelector('.text').textContent = message.content;
+        messageEl.querySelector('.time').textContent = formatMessageTime(message.sentAt);
+        
+        messagesContainer.appendChild(clone);
+      });
+      
+      // Scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
+  }
+  
+  // Send message
+  async function sendMessage() {
+    const content = messageInput.value.trim();
+    if (!content) return;
+    
+    try {
+      const response = await fetch('/messages/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          recipientId: currentRecipientId,
+          content
+        })
+      });
+      
+      if (response.ok) {
+        messageInput.value = '';
+        messageInput.style.height = 'auto';
+        
+        // Reload conversation to show new message
+        await loadConversation(currentRecipientId);
+      } else {
+         const errorData = await response.json();
+        console.error('Error sending message:', errorData);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  }
+  
+  // Initialize
+  document.addEventListener('DOMContentLoaded', async () => {
+    // Load conversations
+    await loadConversations();
+    
+    // If on conversation page, load conversation
+    if (subPage === 'conversation' && currentRecipientId) {
+      await loadConversation(currentRecipientId);
+      
+      // Set up message sending
+      sendButton.addEventListener('click', sendMessage);
+      messageInput.addEventListener('keypress', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+    }
+    
+    // Set up refresh interval for conversations
+    setInterval(loadConversations, 30000); // Refresh every 30 seconds
+    
+    // If on conversation page, set up refresh interval for messages
+    if (subPage === 'conversation' && currentRecipientId) {
+      setInterval(() => loadConversation(currentRecipientId), 10000); // Refresh every 10 seconds
+    }
+  });
+</script> 

@@ -1,0 +1,54 @@
+<link rel="stylesheet" href="/css/devtube/pages/channel.css">
+
+<% const formatNumber=num=> num >= 1e6 ? (num / 1e6).toFixed(2) + "M" : num >= 1e3 ? (num / 1e3).toFixed(2) + "K" : Math.floor(num).toString() %>
+
+<div class="main scrollable">
+  <section class="banner <%= currentChannel.bannerImageURL ?'':'hidden' %>">
+    <div class="banner-container">
+      <img preload src="<%= currentChannel.bannerImageURL %>" alt="bannerImage">
+    </div>
+  </section>
+  <section class="info">
+    <div class="row">
+      <img src="<%= currentChannel.logoURL %>" alt="">
+      <div class="column">
+        <p class="name"> <%= currentChannel.name %> </p>
+        <p class="information">
+          @<%= currentChannel.handle %> ‧ <%= formatNumber(currentChannel.subscribers.length,true) %>
+          subscribers
+          <%=  (currentChannel.videos.length > 0 ) ? '‧ '+formatNumber(currentChannel.videos.length,true)+' videos':'' %>
+        </p>
+        <p class="more">More about this channel <span>...more</span></p>
+
+        <% if (channel?.uid == currentChannel.uid) { %>
+        <div class="row btns">
+          <a href="/studio/channel/<%= channel?.uid %>/editing/">Customize channel</a>
+          <a href="/studio/channel/<%= channel?.uid %>/content">Manage videos</a>
+        </div>
+        <% } else { %>
+        <div class="row btns">
+          <%- include('../components/subscribeBtn.ejs',{currentChannel:currentChannel}) %>
+          <% if (channel?.uid) { %>
+          <a href="/messages/<%= currentChannel._id %>" class="message-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+              <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+            </svg>
+            <span>Message</span>
+          </a>
+          <% } %>
+        </div>
+        <% } %>
+      </div>
+    </div>
+
+
+  </section>
+
+  <%- include('../components/contents.ejs',{
+    padding:'0 180px 0 160px',
+    query:"channel="+currentChannel._id    
+  })%>
+
+  </body>
+
+  </html>
